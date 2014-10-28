@@ -1,0 +1,28 @@
+Hi, the Python code file includes the following parts:
+
+1: Main: used to initialise the input and run the function for getting the output (scheduled test jobs);
+
+2: CiscoJobSchedulingExecute: main class for scheduling used to set the input, set the parameters (e.g., maximum of generation iterations) and run the algorithm.
+
+3: Problem, Problem_scheduling: used to define our scheduled problem for calculating the fitness function as we discussed.
+
+4: Search, SSGA, OpOEA and Individual: used to implement the (1+1) Evolutionary algorithm.
+
+3: Job: used to define to a test job including the following attributes: 
+   1) jobID used to identify the job; 
+   2) maxrunTime means the max execution time for running the test job; 
+   3) requiredresource means the specific test resources required by a test job; 
+   4) priority shows the priority for a test job (the value is simulated from 1 to 10 currently).
+Notice that the input for job list should include values for these attributes. 
+
+4: Resource: used to define to a test resource in the pool including the following attributes: 
+   1) resourceid used to identify a particular resource;
+   2) weight used to represent the weight for a test resource based on the available number of test resources in the pool 
+      and associated number of features; 
+   3) currentbuild shows whether the test resource is in the current setting up, if the currentbuild is true, the 
+      uploadcost will be 1 min. If the currentbuild is false, the uploadcost will be 6 mins for e20/snoopy and 4 mins for
+      the others (the value for cost time can be changed); 
+   4) subnetcost shows the cost for setting up a correct subnet (the current value is simulated from 1 mins to 10 mins); 
+   5) isavailable used to identify the availability of a test resource at a given time. 
+Notice that the input for test resource list should include values for these attributes.
+
