@@ -11,21 +11,8 @@ import sys
 class BookingFailed(Exception):
     pass
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+log = logging.getLogger("Scheduling")
+logging.basicConfig()
 
 #the main programme
 
@@ -140,6 +127,7 @@ class Problem_scheduling(Problem):
         countJobs = 0.0
         tm = 1.0  #fitness value
         temptime = 0  #calculating the whole time for the solution
+        calculated_fitness = 0.0
 
         index = 0
         selectedjobs = []
@@ -278,7 +266,7 @@ class Search(object):
             if self.current_iteration < self.max_iterations:
                 return False
 
-        if self.usingTime() and not self.isTImeExpired():
+        if self.usingTime() and not self.isTimeExpired():
             return False
 
         if self.shouldKeepGoingBasedOnDelta():
