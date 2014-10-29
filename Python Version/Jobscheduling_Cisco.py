@@ -2,10 +2,29 @@ __author__ = 'Ruihua and Shuai'
 
 import random
 import string
+import logging
 import time
 import copy
 import math
 import sys
+
+class BookingFailed(Exception):
+    pass
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 #the main programme
@@ -27,31 +46,31 @@ def main():
 class CiscoJobSchedulingExecute():
 
     def __init__(self, jobs=[], resources=[], jobsMin=0, jobsMax=0, loopNum=1):
-        self.jobs = jobs  #test jobs
-        self.resources = resources  #test resources
+        self.jobs = jobs  # test jobs
+        self.resources = resources  # test resources
         self.values = []
         self.jobsMin = jobsMin
         self.jobsMax = jobsMax
         self.loopNum = loopNum
 
-    def getValues_1(self, MaxIterations=500):
-        s = [OpOEA()]  # call the (1+1) Evolutionary algorithm
+    def search(self, MaxIterations=20):
+        algorithms = [OpOEA()]
 
-        for sea in range(len(s)):
+        for search_algorithm in algorithms:
             for k in range(self.loopNum):
                 p = Problem_scheduling()  # initialise the Cisco test scheduling problem
                 p.setresources(self.resources)  # set the initialised test resources
                 p.setjobs(self.jobs)  # set the initialised test jobs
                 p.setjobsMin(self.jobsMin)  # set the minimum of number of outputted jobs, which is 1
                 p.setjobsMax(self.jobsMax)  # set the maximum of number of outputted jobs, which is the length of input test job list
-                s[sea].setMaxIterations(MaxIterations)  # set the maximum of generation number used by search algorithm
-                t = Search()  # search for the optimal order
+                search_algorithm.setMaxIterations(MaxIterations)
+                search_algorithm.setStopAfterMilliseconds(10 * 1000)
+                t = Search()
                 t.validateConstraints(p)
-                v_1 = s[sea].search(p)
+                variables = search_algorithm.search(p)
 
-                optimal_test_order = p.getFitness(v_1)  #obtain the optimal order
-
-                return optimal_test_order   #return the optimal order as output
+                optimal_test_order, fitness = p.getFitness(variables)
+                return optimal_test_order
 
 
 #The below codes are used to defined the scheduling problem for calculating the fitness function
@@ -124,66 +143,61 @@ class Problem_scheduling(Problem):
 
         index = 0
         selectedjobs = []
+        random.seed(v[0])
+        choosable_jobs = {j: 1 for j in self.jobs}
+        #while jobs_scheduled_count < v[0]:
+        while len(choosable_jobs):
+            tempjob = random.choice(choosable_jobs.keys())
+            del choosable_jobs[tempjob]
 
-        time_start = time.time()
-
-        while index < v[0]:
-            jobId = int(((self.jobsMax - 1) * random.random()) + 1)
-
-            time_current = time.time()
-            gap_of_time = time_current - time_start
-
-            if gap_of_time <= 60:
-
-                if self.jobs[jobId].jobId in selectedjobs:
-                    continue
-
-                tempjob = self.jobs[jobId]
-                maxuploadcost = 0
-                maxsubnetcost = 0
-                sumweight = 0.0
+            maxuploadcost = 0
+            maxsubnetcost = 0
+            sumweight = 0.0
+            try:
                 tempresources = tempjob.getRequiredResource()
-                tag_of_record = True
+            # 
+            #     tempresources = self.findPossibleResources(
+            #         temprequiredresources, tempjob)
+            except BookingFailed:
+                continue
 
-                for i in range(len(tempresources)):
+            selectedjobs.append((tempjob, tempresources))
 
-                    tempresource = tempresources[i]
+            for tempresource in tempresources:
+                if tempresource.getcurrentbuild():
+                    tempresource.uploadcost = 1
+                else:
+                    tempresource.uploadcost = 6
+                if maxuploadcost < tempresource.getUploadcost():
+                    maxuploadcost = tempresource.getUploadcost()
+                if maxsubnetcost < tempresource.getSubnetcost():
+                    maxsubnetcost = tempresource.getSubnetcost()
 
-                    if not tempresource.getisavailable():
-                        tag_of_record = False
-                        break
-                    else:
-                        tag_of_record = True
+                sumweight += tempresource.getWeight()
 
-                    if tempresource.getcurrentbuild():
-                        tempresource.uploadcost = 1
-                    else:
-                        tempresource.uploadcost = 6
-                    if maxuploadcost < tempresource.getUploadcost():
-                        maxuploadcost = tempresource.getUploadcost()
-                    if maxsubnetcost < tempresource.getSubnetcost():
-                        maxsubnetcost = tempresource.getSubnetcost()
+            numNorm = float(1 - self.Nor(tempjob.getPriority()))
+            calculated_fitness += sumweight * (tempjob.getMaxRunTime() + maxuploadcost + maxsubnetcost) * numNorm
 
-                    sumweight = sumweight + tempresource.getWeight()
-                    index = index + 1
+            tempjob.chosenResources = tempresources
+            for temp in tempresources:
+                temp.setisavailable(False)
 
-                    temptime = temptime + tempjob.getMaxRunTime() + maxuploadcost + maxsubnetcost
+        calculated_fitness = self.Nor(calculated_fitness)
+        job_count_fitness = 1 - (len(selectedjobs) / float(self.jobsMax))
 
-                    numNorm = float(1 - self.Nor(tempjob.getPriority()))
-                    tm += sumweight * (tempjob.getMaxRunTime() + maxuploadcost + maxsubnetcost) * numNorm
-                    tm = self.Nor(tm)
+        countresource = len([r for r in self.resources if r.isavailable])
 
-                if tag_of_record:
-                    selectedjobs.append(self.jobs[jobId].jobId)
-                    for iii in range(len(tempresources)):
-                        tempresources[iii].setisavailable(False)
+        resourceNor = float(countresource) / len(self.resources)
+        calculated_fitness = (float(calculated_fitness) / 3 +
+                              float(job_count_fitness) / 3 +
+                              float(resourceNor) / 3)
 
-            else:
-                print "Out of time of finding all jobs!"
-                break
+        for resource in self.resources:
+            resource.setisavailable(True)
 
-        jobb = self.jobsMax - v[0]
-        jobNor = float(jobb / self.jobsMax)
+        log.info("[%s] Managed selection with %s jobs (fitness: %s)",
+                 v, len(selectedjobs), calculated_fitness)
+        return selectedjobs, calculated_fitness
 
         countresource = 0
         for k in range(len(self.resources)):
@@ -224,10 +238,7 @@ class Search(object):
 
         if not self.hasStoppingCriterion():
 
-            try:
-                raise MyException(Exception)
-            except MyException:
-                print "No stopping criterion defined for " + self.getShortName()
+            raise RuntimeError("No stopping criterion defined for " + self.getShortName())
 
 
         self.current_iteration = 0
@@ -241,11 +252,7 @@ class Search(object):
         c = problem.getConstraints()
 
         if not self.areConstraintsValid(c):
-
-            try:
-                raise MyException(Exception)
-            except MyException:
-                print "This Problem has invalid constraints"
+            raise RuntimeError("This Problem has invalid constraints")
 
     def areConstraintsValid(self, constraints):
 
@@ -309,12 +316,7 @@ class Search(object):
     def normalise(self, x):
 
         if x < 0:
-
-            try:
-                raise MyException(Exception)
-            except MyException:
-                print "Cannot normalise negative value " + x
-
+            raise RuntimeError("Cannot normalise negative value %s" % x)
         return x / (x + 1.0)
 
     def setStopAfterMilliseconds(self, ms):
@@ -325,9 +327,10 @@ class Search(object):
 
         self.delta = d
 
-    def reportImprovement(self):
-
-        self.last_improvement = time.time()
+    def reportImprovement(self, v):
+        self.last_improvement = time.time() 
+        self.best_arguments = v
+        print v
 
     def shouldKeepGoingBasedOnDelta(self):
 
@@ -350,44 +353,35 @@ class SSGA(Search):
         self.population_size = population_size
         self.xover_rate = xover_rate
 
-
-    def mutateAndEvaluateOffspring(self, ind, force_muatation):
+    def mutateAndEvaluateOffspring(self, individual, force_muatation):
         mutated = False
-        cons = ind.problem.getConstraints()
-        p = 1.0 / float(len(ind.v))
+        constraints = individual.problem.getConstraints()
+        random.seed()
 
         while not mutated:
             if not force_muatation:
                 mutated = True
-            for i in xrange(len(ind.v)):
-
-                if p >= random.random():
-                    value = ind.v[i]
-
-                    while value == ind.v[i]:
-                        MIN = cons[i][0]
-                        MAX = cons[i][1]
-                        dif = MAX - MIN
-
-                        if cons[i][2] == Problem.CATEGORICAL_TYPE:
-                            value = MIN + random.randint(0, dif)
-                        else:
-                            step = dif / 100.0
-                            if random.randint(0, 0xff) % 2 == 0:
-                                sign = -1
-                            else:
-                                sign = 1
-                            delta = sign * (1 + int(step * random.random()))
-                            k = ind.v[i] + delta
-                            if k > MAX:
-                                k = MAX
-                            if k < MIN:
-                                k = MIN
-                            value = k
-                    ind.v[i] = value
-                    mutated = True
-
-        ind.evaluate()
+            for i, argument in enumerate(individual.v[:]):
+                old_argument = int(argument)
+                while argument == old_argument:
+                    MIN = constraints[i][0]
+                    MAX = constraints[i][1]
+                    diff = MAX - MIN
+                    if diff == 0:
+                        mutated = True
+                        break
+                    step = diff / 100.0
+                    sign = random.choice([1, -1])
+                    delta = sign * (1 + int(step * random.random()))
+                    new_argument = argument + delta
+                    if new_argument > MAX:
+                        new_argument = MAX
+                    if new_argument < MIN:
+                        new_argument = MIN
+                    argument = new_argument
+                individual.v[i] = argument
+                mutated = True
+        individual.evaluate()
         self.increaseIteration()
 
 
@@ -405,25 +399,20 @@ class OpOEA(SSGA):
         if current.fitness_value == 0.0:
             return current.v
 
-        tmp = getRandomIndividual(problem)
-
-
+        best_fitness = current.fitness_value
+        self.reportImprovement(current.v[:])
 
         while not self.isStoppingCriterionFulfilled():
-            tmp.copyDataFrom(current)
-            self.mutateAndEvaluateOffspring(tmp, True)
+            self.mutateAndEvaluateOffspring(current, True)
 
-            if tmp.fitness_value == 0.0:
-                return tmp.v
+            if current.fitness_value == 0.0:
+                return current.v
 
-            if tmp.fitness_value <= current.fitness_value:
-                current.copyDataFrom(tmp)
-                if tmp.fitness_value < current.fitness_value:
-                    self.reportImprovement()
+            if current.fitness_value < best_fitness:
+                best_fitness = current.fitness_value
+                self.reportImprovement(current.v[:])
 
-
-
-        return current.v
+        return self.best_arguments
 
     def getShortName(self):
         return "OpOEA"
@@ -435,15 +424,15 @@ class OpOEA(SSGA):
 # 3) requiredresource means the specific test resources required by a test job;
 # 4) Priority shows the priority for a test job (the value is simulated from 1 to 10 currently).
 
-class Job():
+class Job(object):
     def __init__(self):
         self.jobId = int()
         self.maxRunTime = int()
         self.taskId = int()
-        self.list = []
-        self.size = int()
+        self.task = None
         self.priority = int(random.random() * 9 + 1)
         self.requiredresource = []
+        self.chosenResources = []
 
     def getJobId(self):
         return self.jobId
@@ -485,12 +474,17 @@ class Job():
         self.requiredresource = requiredresource
 
 
-#Resource means the test resources in the pool including a set of attributes.
-#1) resourceid is used to identify a resource; 
-#2) weight is used to represent the weight of a test resource based on the available number of test resources in the pool and associated #features; 
-#3) currentbuild shows if the test resource is in the current setting up, if the currentbuild is true, the uploadcost will be 1 min. If the currentbuild is false, the uploadcost will be 6 mins for e20/snoopy and 4 mins for the others (the cost value can be changed); 
-#4) subnetcost shows the cost for setting up correct subnet and the current value is simulated from 0 mins to 10 mins;
-#5) isavailable is used to identify the availability of a test resource. 
+# Resource means the test resources in the pool including a set of attributes.
+# 1) resourceid is used to identify a resource;
+# 2) weight is used to represent the weight of a test resource based on the
+#    available number of test resources in the pool and associated #features;
+# 3) currentbuild shows if the test resource is in the current setting up,
+#    if the currentbuild is true, the uploadcost will be 1 min. If the
+#    currentbuild is false, the uploadcost will be 6 mins for e20/snoopy and
+#    4 mins for the others (the cost value can be changed);
+# 4) subnetcost shows the cost for setting up correct subnet and the current
+#    value is simulated from 0 mins to 10 mins;
+# 5) isavailable is used to identify the availability of a test resource.
 
 class Resource():
     def __init__(self):
