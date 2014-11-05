@@ -12,7 +12,7 @@ class BookingFailed(Exception):
     pass
 
 log = logging.getLogger("Scheduling")
-logging.basicConfig()
+#logging.basicConfig(level=logging.INFO)#DEBUG)
 
 #the main programme
 
@@ -40,7 +40,7 @@ class CiscoJobSchedulingExecute():
         self.jobsMax = jobsMax
         self.loopNum = loopNum
 
-    def search(self, MaxIterations=20):
+    def search(self, MaxIterations=500):
         algorithms = [OpOEA()]
 
         for search_algorithm in algorithms:
@@ -123,6 +123,44 @@ class Problem_scheduling(Problem):
         m = float(n / (n + 1))
         return m
 
+    def calculateFitness(self, jobs):
+        """
+        Stubbed out fitness calculation for testing, not in use right now but maybe we should use it in getFitness.
+        """
+        sumweight = 0
+        calculated_fitness = 0
+        for job in jobs:
+
+            maxuploadcost = 0
+            maxsubnetcost = 0
+            for tempresource in job.chosenResources:
+                if tempresource.getcurrentbuild():
+                    tempresource.uploadcost = 1
+                else:
+                    tempresource.uploadcost = 6
+                if maxuploadcost < tempresource.getUploadcost():
+                    maxuploadcost = tempresource.getUploadcost()
+                if maxsubnetcost < tempresource.getSubnetcost():
+                    maxsubnetcost = tempresource.getSubnetcost()
+                sumweight += tempresource.getWeight()
+            numNorm = float(1 - self.Nor(job.getPriority()))
+            calculated_fitness += sumweight * (job.getMaxRunTime() + maxuploadcost + maxsubnetcost) * numNorm
+
+        calculated_fitness = self.Nor(calculated_fitness)
+        job_count_fitness = 1 - (len(jobs) / float(self.jobsMax))
+
+        countresource = len([r for r in self.resources if r.isavailable])
+
+        resourceNor = float(countresource) / len(self.resources)
+        calculated_fitness = (float(calculated_fitness) / 3 +
+                              float(job_count_fitness) / 3 +
+                              float(resourceNor) / 3)
+
+        for resource in self.resources:
+            resource.setisavailable(True)
+
+        return calculated_fitness
+
     def getFitness(self, v):
         countJobs = 0.0
         tm = 1.0  #fitness value
@@ -131,22 +169,31 @@ class Problem_scheduling(Problem):
 
         index = 0
         selectedjobs = []
-        random.seed(v[0])
-        choosable_jobs = {j: 1 for j in self.jobs}
+        #random.seed(v[0])
+        choosable_jobs = {j: j.jobId for j in self.jobs}
         #while jobs_scheduled_count < v[0]:
-        while len(choosable_jobs):
+        #print "\n" * 5
+        log.debug("Choosable jobs, %r", choosable_jobs)
+        log.debug("Resources, %r", self.resources)
+        used_resources = []
+        while len(choosable_jobs) and len(selectedjobs) < v[0]:
             tempjob = random.choice(choosable_jobs.keys())
+
             del choosable_jobs[tempjob]
+            log.debug("After pick jobs, %r", choosable_jobs)
+            log.debug("Trying to schedule %r", tempjob)
 
             maxuploadcost = 0
             maxsubnetcost = 0
             sumweight = 0.0
             try:
                 tempresources = tempjob.getRequiredResource()
+                log.debug("Success booking %r", tempjob)
             # 
             #     tempresources = self.findPossibleResources(
             #         temprequiredresources, tempjob)
             except BookingFailed:
+                log.debug("Booking resources for %r failed" % tempjob)
                 continue
 
             selectedjobs.append((tempjob, tempresources))
@@ -170,6 +217,9 @@ class Problem_scheduling(Problem):
             for temp in tempresources:
                 temp.setisavailable(False)
 
+        if len(selectedjobs) == 0:
+            return [], 1.0
+
         calculated_fitness = self.Nor(calculated_fitness)
         job_count_fitness = 1 - (len(selectedjobs) / float(self.jobsMax))
 
@@ -186,19 +236,6 @@ class Problem_scheduling(Problem):
         log.info("[%s] Managed selection with %s jobs (fitness: %s)",
                  v, len(selectedjobs), calculated_fitness)
         return selectedjobs, calculated_fitness
-
-        countresource = 0
-        for k in range(len(self.resources)):
-            if self.resources[k].isavailable == True:
-                countresource = countresource + 1
-
-        resourceNor = float(countresource / len(self.resources))
-        tm = float(tm / 3 + jobNor / 3 + resourceNor / 3)
-
-        for kk in range(len(self.resources)):
-            self.resources[kk].setisavailable(True)
-
-        return selectedjobs
 
 
 #the framework of the approach
@@ -220,7 +257,6 @@ class Search(object):
         self.current_iteration = int()
 
     def search(self, problem):
-
         start_time = time.time()
         self.last_improvement = start_time
 
@@ -318,7 +354,6 @@ class Search(object):
     def reportImprovement(self, v):
         self.last_improvement = time.time() 
         self.best_arguments = v
-        print v
 
     def shouldKeepGoingBasedOnDelta(self):
 
@@ -387,17 +422,21 @@ class OpOEA(SSGA):
         if current.fitness_value == 0.0:
             return current.v
 
-        best_fitness = current.fitness_value
+        best_fitness = current.fitness_value[1]
         self.reportImprovement(current.v[:])
 
         while not self.isStoppingCriterionFulfilled():
             self.mutateAndEvaluateOffspring(current, True)
+            current_fitness = current.fitness_value[1]
 
-            if current.fitness_value == 0.0:
+            if current_fitness == 0.0:
                 return current.v
 
-            if current.fitness_value < best_fitness:
-                best_fitness = current.fitness_value
+            #log.debug("Current fitness: %f\tbest fitness: %f", current_fitness, best_fitness)
+            #print [a[0] for a in current.fitness_value[0]]
+            if current_fitness < best_fitness:
+                log.info('Fitness improved - new fitness %s - best fitness was %s', current_fitness, best_fitness)
+                best_fitness = current_fitness
                 self.reportImprovement(current.v[:])
 
         return self.best_arguments
@@ -418,7 +457,7 @@ class Job(object):
         self.maxRunTime = int()
         self.taskId = int()
         self.task = None
-        self.priority = int(random.random() * 9 + 1)
+        self.priority = 1.0 #int(random.random() * 9 + 1)
         self.requiredresource = []
         self.chosenResources = []
 
@@ -461,6 +500,9 @@ class Job(object):
     def setRequiredResource(self, requiredresource):
         self.requiredresource = requiredresource
 
+    def __repr__(self):
+        return '<job id:%d %d>' % (self.jobId, self.maxRunTime)
+
 
 # Resource means the test resources in the pool including a set of attributes.
 # 1) resourceid is used to identify a resource;
@@ -475,14 +517,13 @@ class Job(object):
 # 5) isavailable is used to identify the availability of a test resource.
 
 class Resource():
-    def __init__(self):
-        self.resourceid = int()
-        self.weight = float()
-        self.currentbuild = bool()
-        self.uploadcost = int()
-        self.subnetcost = int()
-        self.isavailable = bool()
-        self.subnetcost = int(random.random() * 10)
+    def __init__(self, resourceid=1, weight=1.0, currentbuild=False, uploadcost=0, subnetcost=0, isavailable=True):
+        self.resourceid = resourceid
+        self.weight = weight
+        self.currentbuild = currentbuild
+        self.uploadcost = uploadcost
+        self.subnetcost = subnetcost
+        self.isavailable = isavailable
 
     def getResourceId(self):
         return self.resourceid
@@ -516,6 +557,9 @@ class Resource():
 
     def getcurrentbuild(self):
         return self.currentbuild
+
+    def __repr__(self):
+        return '<res %d %s>' % (self.resourceid, self.isavailable)
 
 
 #used in DataReader, to transform the string True or False to the True and False
@@ -576,9 +620,9 @@ def getRandomIndividual(p):
         k = random.randint(0, dif)
 
         ind.v[i] = Min + k
-        if ind.v[i] == 0:
-            print ""
-    ind.evaluate()
+        #if ind.v[i] == 0:
+        #    print ""
+    #ind.evaluate()
     return ind
 
 
