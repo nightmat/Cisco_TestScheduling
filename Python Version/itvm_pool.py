@@ -1,5 +1,6 @@
 from collections import defaultdict
 from Jobscheduling_Cisco import Job, Resource, BookingFailed
+from dateutil.parser import parse as parse_date
 
 class FeatureMap(object):
     def __init__(self, resources):
@@ -14,7 +15,8 @@ class FeatureMap(object):
     def add(self, resource):
         for feat in resource.features:
             self.features[feat].add(resource)
-        self.types[resource.type].add(resource)
+        for type in resource.types:
+            self.types[type].add(resource)
 
     def filter(self, required):
         key = [required['type'], ]
@@ -72,12 +74,20 @@ def make_job(task, *args):
     j.priority = task['priority']
     j.requiredresource = task['required']
     j.maxRunTime = task['max_runtime']
+    if 'add_time' in task:
+        j.add_time = int(parse_date(task['add_time']).strftime("%s"))
+    if 'duration' in task:
+        if task['duration'] is None:
+            j.duration = None
+        else:
+            j.duration = int(task['duration'])
     return j
 
 def make_resource(res):
     r = Resource()
     r.resourceid = res['id']
     r.type = res['type']
+    r.types = res['types']
     r.features = set(res['features'])
     r.currentbuild = '0'
     r.uploadcost = 10
