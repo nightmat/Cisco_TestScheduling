@@ -6,6 +6,7 @@ class FeatureMap(object):
     def __init__(self, resources):
         self.features = defaultdict(set)
         self.types = defaultdict(set)
+        self.groups = defaultdict(set)
         self.resources = []
         self.cache = {}
 
@@ -17,32 +18,38 @@ class FeatureMap(object):
             self.features[feat].add(resource)
         for type in resource.types:
             self.types[type].add(resource)
+        for group in resource.groups:
+            self.groups[group].add(resource)
 
-    def filter(self, required):
-        key = [required['type'], ]
+    def filter(self, required, group):
+        key = [group, required['type'], ]
         if 'features' in required:
             key.extend(required['features'])
         key = tuple(key)
         if key in self.cache:
             return self.cache[key]
 
-        res = self._filter(required)
-
+        res = list(self._filter(required, group))
+        res.sort(lambda a, b: cmp(len(a.features), len(b.features)))
         self.cache[key] = res
         return res
 
-    def _filter(self, required):
+    def _filter(self, required, group):
         base = self.types[required['type']].copy()
+        l = len(base)
+        if group is not None:
+            base.intersection_update(self.groups[group])
+        l = l - len(base)
         if 'features' in required:
             for feature in required['features']:
                 base.intersection_update(self.features[feature])
         return base
 
-    def find_required_resources(self, requirements):
+    def find_required_resources(self, requirements, group):
         results = []
         success = True
         for req in requirements:
-            tmp = self.filter(req)
+            tmp = self.filter(req, group)
             for ep in tmp:
                 if ep.isavailable:
                     break
@@ -52,6 +59,7 @@ class FeatureMap(object):
             ep.isavailable = False
             results.append(ep)
         for ep in results:
+            assert group in ep.groups
             ep.isavailable = True
         if not success:
             return None
@@ -63,7 +71,7 @@ class MyJob(Job):
         self._map = _map
 
     def getRequiredResource(self):
-        res = self._map.find_required_resources(self.requiredresource)
+        res = self._map.find_required_resources(self.requiredresource, self.group)
         if res is None:
             raise BookingFailed()
         return res
@@ -74,8 +82,12 @@ def make_job(task, *args):
     j.priority = task['priority']
     j.requiredresource = task['required']
     j.maxRunTime = task['max_runtime']
+    if 'group' in task:
+        j.group = task['group']
     if 'add_time' in task:
         j.add_time = int(parse_date(task['add_time']).strftime("%s"))
+    if 'started' in task:
+        j.started = int(parse_date(task['started']).strftime("%s"))
     if 'duration' in task:
         if task['duration'] is None:
             j.duration = None
@@ -89,6 +101,7 @@ def make_resource(res):
     r.type = res['type']
     r.types = res['types']
     r.features = set(res['features'])
+    r.groups = res['groups']
     r.currentbuild = '0'
     r.uploadcost = 10
     r.subnetcost = 0

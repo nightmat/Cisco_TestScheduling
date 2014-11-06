@@ -6,24 +6,31 @@ import sys
 import logging
 import csv
 import os
+import collections
+
 log = logging.getLogger("simitvm")
 logging.basicConfig()
 
 class ItvmSimulator(object):
-    def __init__(self, resources, tasks, search, output):
+    def __init__(self, resources, tasks, search, output, planner_ticks=None):
         self.resources = resources
         self.future_tasks = tasks
         self.future_tasks.sort(lambda a,b: cmp(a.add_time, b.add_time))
         self.search = search
         self.output = output
+        self.type_stat = collections.defaultdict(int)
+        self.feature_stat = collections.defaultdict(int)
 
         self.runnable = []
         self.running = []
         self.completed = []
         self.clock = tasks[0].add_time
 
-        self.next_planner_tick = None
-        self.planner_time = 120
+        if planner_ticks is not None:
+            self.next_planner_tick = self.clock
+            self.planner_time = planner_ticks
+        else:
+            self.next_planner_tick = None
 
         self.start = self.clock
 
@@ -67,10 +74,10 @@ class ItvmSimulator(object):
 
         if tasks is not None:
             # if we have a subset of the tasks to search
-            to_run = self.search(available_resources, tasks)
+            to_run = self.search(available_resources, tasks, self.clock)
         else:
             # else do them all.
-            to_run = self.search(available_resources, self.runnable)
+            to_run = self.search(available_resources, self.runnable, self.clock)
         if len(to_run) == 0:
             return
 
@@ -80,6 +87,11 @@ class ItvmSimulator(object):
             assert finish > self.clock
             self.running.append((finish, test))
 
+            for k in test.requiredresource:
+                self.type_stat[k['type']] += 1
+                if 'features' in k:
+                    for feature in k['features']:
+                        self.feature_stat[feature] += 1
             for resource in test.chosenResources:
                 resource.isavailable = False
             if tasks:
@@ -150,20 +162,34 @@ class ItvmSimulator(object):
         print
         print "Duration: %d" % (self.last_clock - self.start)
 
+        print
+        print "Most used types"
+        types = self.type_stat.items()
+        types.sort(lambda a,b: cmp(a[1], b[1]))
+        for k,v in reversed(types):
+            print k, v
+
+        print
+        print "Most used features"
+        features = self.feature_stat.items()
+        features.sort(lambda a,b: cmp(a[1], b[1]))
+        for k, v in reversed(features):
+            print k, v
+
 
 from Jobscheduling_Cisco import CiscoJobSchedulingExecute
-def search_0_plus_0(resources, jobs):
+def search_0_plus_0(resources, jobs, clock):
     # scheduling search
     scheduling = CiscoJobSchedulingExecute(jobs,
                                            resources,
                                            0,
                                            len(jobs),
                                            loopNum=1)
-    res = scheduling.search(MaxIterations=50)
+    res = scheduling.search(MaxIterations=20)
     return [x[0] for x in res]
 
 
-def fcfs(resources, jobs):
+def fcfs(resources, jobs, clock):
     # just pick all tasks that can be ran.
     res = []
     tresources = []
@@ -181,6 +207,25 @@ def fcfs(resources, jobs):
     return res
 
 
+def itvm_started(resources, jobs, clock):
+    res = []
+    for job in jobs:
+        if clock > job.started:
+            #tmp = job.getRequiredResource()
+            #for t in tmp:
+            #    t.isavailable = False
+            required = len(job.requiredresource)
+            if required > 0:
+                job.chosenResources = []
+                for r in resources:
+                    if r.isavailable:
+                        r.isavailable = False
+                        job.chosenResources.append(r)
+                        if len(job.chosenResources) == required:
+                            break
+            res.append(job)
+    return res
+
 def main():
     if len(sys.argv) == 1:
         print "Usage: sim_itvm.py <output.csv> [fcfs]"
@@ -191,12 +236,16 @@ def main():
         sys.exit(1)
     resources = json.load(open('resources.json'))
     resources = map(make_resource, resources)
+    import random
+    random.seed(3)
+    resources = random.sample(resources, int(len(resources) *0.66))
     _map = FeatureMap(resources)
 
-    if not os.path.exists('tasks.json'):
+    tasks_file = 'tasks.json'
+    if not os.path.exists(tasks_file):
         print "tasks.json not found"
         sys.exit(1)
-    tasks = json.load(open('tasks.json'))
+    tasks = json.load(open(tasks_file))
     jobs = map(lambda x: make_job(x, _map), tasks)
     jobs.sort(lambda a, b: cmp(a.add_time, b.add_time))
     jobs = filter(lambda x: x.duration is not None, jobs)
@@ -216,6 +265,9 @@ def main():
     if 'fcfs' in sys.argv:
         print "Using fcfs"
         search_to_use = fcfs
+    elif 'itvm' in sys.argv:
+        print "Using itvm started times"
+        search_to_use = itvm_started
     else:
         print "Using 0+0 search"
         search_to_use = search_0_plus_0
