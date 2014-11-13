@@ -24,6 +24,7 @@ class ItvmSimulator(object):
         self.runnable = []
         self.running = []
         self.completed = []
+        self.uploads = 0
         self.clock = tasks[0].add_time
 
         if planner_ticks is not None:
@@ -83,7 +84,20 @@ class ItvmSimulator(object):
 
         for test in to_run:
             assert test.duration > 0
+
+            needs_upload = False
+            for resource in test.chosenResources:
+                resource.isavailable = False
+                if resource.currentbuild != test.revision:
+                    test._map.update_revision(resource, test.revision)
+                    needs_upload = True
+            if needs_upload:
+                self.uploads += 1
+
             finish = self.clock + test.duration
+
+            if needs_upload:
+                finish += 300
             assert finish > self.clock
             self.running.append((finish, test))
 
@@ -92,8 +106,6 @@ class ItvmSimulator(object):
                 if 'features' in k:
                     for feature in k['features']:
                         self.feature_stat[feature] += 1
-            for resource in test.chosenResources:
-                resource.isavailable = False
             if tasks:
                 tasks.remove(test)
             self.runnable.remove(test)
@@ -123,7 +135,7 @@ class ItvmSimulator(object):
         """
         f = open(self.output, 'w')
         csv_w = csv.writer(f)
-        row = ['time', 'future', 'runnable', 'running', 'completed', 'resources']
+        row = ['time', 'future', 'runnable', 'running', 'completed', 'resources', 'uploads']
         csv_w.writerow(row)
         print ', '.join(row)
 
@@ -145,8 +157,10 @@ class ItvmSimulator(object):
                         len(self.runnable),
                         len(self.running),
                         len(self.completed),
-                        len(filter(lambda x: x.isavailable, self.resources))]
-                csv_w.writerow(row)
+                        len(filter(lambda x: x.isavailable, self.resources)),
+                        self.uploads]
+                if iteration % 4 == 0:
+                    csv_w.writerow(row)
                 if iteration % 400 == 0:
                     print ', '.join(map(str, row))
 
@@ -175,6 +189,8 @@ class ItvmSimulator(object):
         features.sort(lambda a,b: cmp(a[1], b[1]))
         for k, v in reversed(features):
             print k, v
+
+        print "Upload count: %d" % self.uploads
 
 
 from Jobscheduling_Cisco import CiscoJobSchedulingExecute

@@ -134,7 +134,7 @@ class Problem_scheduling(Problem):
             maxuploadcost = 0
             maxsubnetcost = 0
             for tempresource in job.chosenResources:
-                if tempresource.getcurrentbuild():
+                if tempresource.getcurrentbuild() == job.revision:
                     tempresource.uploadcost = 1
                 else:
                     tempresource.uploadcost = 6

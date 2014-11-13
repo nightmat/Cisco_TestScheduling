@@ -7,6 +7,7 @@ class FeatureMap(object):
         self.features = defaultdict(set)
         self.types = defaultdict(set)
         self.groups = defaultdict(set)
+        self.revisions = defaultdict(set)
         self.resources = []
         self.cache = {}
 
@@ -45,17 +46,30 @@ class FeatureMap(object):
                 base.intersection_update(self.features[feature])
         return base
 
-    def find_required_resources(self, requirements, group):
+    def find_required_resources(self, requirements, group, revision=None):
         results = []
         success = True
         for req in requirements:
             tmp = self.filter(req, group)
-            for ep in tmp:
-                if ep.isavailable:
-                    break
+            if revision is not None:
+                rev = self.revisions[revision].intersection(tmp)
+                for ep in rev:
+                    if ep.isavailable:
+                        break
+                else:
+                    for ep in tmp:
+                        if ep.isavailable:
+                            break
+                    else:
+                        success = False
+                        break
             else:
-                success = False
-                break
+                for ep in tmp:
+                    if ep.isavailable:
+                        break
+                else:
+                    success = False
+                    break
             ep.isavailable = False
             results.append(ep)
         for ep in results:
@@ -65,13 +79,25 @@ class FeatureMap(object):
             return None
         return results
 
+    def update_revision(self, endpoint, revision):
+        if revision == endpoint.currentbuild:
+            return
+        if endpoint in self.revisions[endpoint.currentbuild]:
+            if len(self.revisions[endpoint.currentbuild]) == 1:
+                del self.revisions[endpoint.currentbuild]
+            else:
+                self.revisions[endpoint.currentbuild].remove(endpoint)
+        endpoint.currentbuild = revision
+        self.revisions[endpoint.currentbuild].add(endpoint)
+
 class MyJob(Job):
     def __init__(self, _map):
         super(MyJob, self).__init__()
         self._map = _map
+        self.revision = None
 
     def getRequiredResource(self):
-        res = self._map.find_required_resources(self.requiredresource, self.group)
+        res = self._map.find_required_resources(self.requiredresource, self.group, self.revision)
         if res is None:
             raise BookingFailed()
         return res
@@ -93,6 +119,8 @@ def make_job(task, *args):
             j.duration = None
         else:
             j.duration = int(task['duration'])
+    if 'revision' in task:
+        j.revision = task['revision']
     return j
 
 def make_resource(res):
